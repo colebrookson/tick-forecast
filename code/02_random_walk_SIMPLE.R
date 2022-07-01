@@ -34,6 +34,9 @@ ticks <- merge(ticks, covs, by = c("time", "siteID"))
 #Data for cross-validation
 ticks2=ticks[which(ticks$Year==2019),]
 dim(ticks2)
+ticks_2019 = ticks
+ticks_2019[which(ticks_2019$Year != 2019), "amblyomma_americanum"] = NA
+ticks_2019 = ticks_2019$amblyomma_americanum
 
 # set NA's for 2019
 ticks[which(ticks$Year == 2019), "amblyomma_americanum"] = NA
@@ -80,6 +83,7 @@ model{
   x[1] ~ dgamma(x_ic,x_beta)
   tau_obs ~ dgamma(a_obs,r_obs)
   tau_random ~ dgamma(a_obs, r_obs)
+  tau_process ~ dgamma(0.001, 0.001)
   beta ~ dmnorm(b0, Vb)
   
   #### Process Model
@@ -90,7 +94,8 @@ model{
     alpha_s[s] ~ dnorm(0, tau_random)
   }
   for(t in 2:n){
-    x[t] <- beta[1] + beta[2]*max_temp[t] + beta[3]*precip[t] + x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
+    mu[t] <- beta[1] + beta[2]*max_temp[site[t]] + beta[3]*precip[site[t]] + x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
+    x[t] ~ dnorm(mu[t], tau_process)
   }
   
   #### Data Model
@@ -99,6 +104,7 @@ model{
   }
 }
 "
+
 
 
 nchain = 3
@@ -119,22 +125,83 @@ jags.out   <- coda.samples (model = j.model,
 plot(jags.out)
 
 jags_out_larger = coda.samples(model = j.model,
-                               variable.names = c("x", "tau_obs", "tau_random", "beta[1]", "beta[2]"),
+                               variable.names = c("x", "tau_obs", "tau_random", "tau_process", "beta[1]", "beta[2]"),
                                n.iter = 1000)
+jags_out = coda.samples(model = j.model,
+                        variable.names = c("x", "tau_obs", "tau_random", "tau_process", "beta[1]", "beta[2]"),
+                        n.iter = 1000)
+#jags_out_params = coda.smaples
+#plot(jags_out_larger)
+
+state.cols = grep("x[", colnames(jags_out[[1]]), fixed = TRUE)
+params = jags_out %>% 
+  purrr::map(~ .[,-state.cols])
+gelman.diag(params)
+gelman.diag(window(as.mcmc.list(params), start = 1001))
+
+
 
 # plotting results
 time.rng = c(1,length(time))       ## adjust to zoom in and out
 out <- as.matrix(jags_out_larger)         ## convert from coda to matrix  
+
+out_large = matrix(nrow = nrow(out), ncol = ncol(out)-5)
+for(i in 1:nrow(out)) {
+  for(j in 1:ncol(out_large)) {
+    out_large[i,j] = rnorm(1, out[i,j+5], out[i,"tau_process"]) 
+  }
+}
+# get difference between confidence interval and predictive interval 
+# normal data model
+# plot two of them - this one is process error, first one is observation error
+
+
 x.cols <- grep("^x",colnames(out)) ## grab all columns that start with the letter x
 ci <- apply(exp(out[,x.cols]),2,quantile,c(0.025,0.5,0.975)) ## model was fit on log scale
+
+ci_process = apply(exp(out_large), 2, quantile,
+                   c(0.025, 0.5, 0.975))
+
+df = data.frame(
+  time = time, 
+  data = y,
+  data_2019 = ticks_2019,
+  estimate = ci[2,],
+  upper_process = ci_process[3,],
+  upper_data = ci[3,],
+  lower_process = ci_process[1,],
+  lower_data = ci[1,]
+)
+
+ggplot(data = df) + 
+  geom_point(aes(x = time, y = y), colour = "blue") + 
+  geom_point(aes(x = time, y = ticks_2019), colour = "red") +
+  geom_line(aes(x = time, y = estimate)) + 
+  geom_line(aes(x = time, y = lower_process), alpha = 0.3, colour = "green2") + 
+  geom_line(aes(x = time, y = upper_process), alpha = 0.3, colour = "green2") + 
+  geom_line(aes(x = time, y = lower_data), alpha = 0.4, colour = "red2") + 
+  geom_line(aes(x = time, y = upper_data), alpha = 0.3, colour = "red2") +
+  ylim(0, 1000)
+
+  geom_ribbon(aes(x = time, ymin = lower_process, ymax = upper_process), 
+              alpha = 0.1, fill = "green2") + 
+  geom_ribbon(aes(x = time, ymin = lower_data, ymax = upper_data),
+              alpha = 0.3, fill = "red1") + 
+  ylim(0, 1000)
+
 
 plot(time,ci[2,],type='n',ylim=range(y,na.rm=TRUE),ylab="tick density",xlim=time[time.rng])
 ## adjust x-axis label to be monthly if zoomed
 if(diff(time.rng) < 100){ 
   axis.Date(1, at=seq(time[time.rng[1]],time[time.rng[2]],by='month'), log='y', format = "%Y-%m")
 }
+ecoforecastR::ciEnvelope(time,ci_process[1,],ci_process[3,],
+                         col=ecoforecastR::col.alpha("lightGreen",0.75))
 ecoforecastR::ciEnvelope(time,ci[1,],ci[3,],col=ecoforecastR::col.alpha("lightBlue",0.75))
+
 points(time,y,pch="+",cex=0.5)
+points(time,ticks_2019, pch="*", cex = 0.5, col = "red")
+
 
 # result_data = data.frame(
 #   time = time,
