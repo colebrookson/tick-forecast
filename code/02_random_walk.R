@@ -55,66 +55,157 @@ sort(unique(week_vec))
 # create new df with NA's filled in 
 length_new_df = length(unique(ticks$mmwrWeek)) * 
   length(unique(ticks$siteID)) * length(unique(ticks$Year))
+
 new_df = data.frame(
-  week = numeric(length = length_new_df),
-  year = numeric(length = length_new_df),
-  density = numeric(length = length_new_df),
-  site = character(length = length_new_df)
+  week = numeric(length = 0),
+  year = numeric(length = 0),
+  density = numeric(length = 0),
+  site_num = numeric(length = 0)
 )
 
-first_week = numeric(length = length(unique(ticks$Year)))
-last_week = numeric(length = length(unique(ticks$Year)))
+first_week = data.frame(
+  first = numeric(length = length(unique(ticks$Year)) *
+                       length(unique(ticks$siteID))),
+  year = numeric(length(unique(ticks$Year)) *
+                   length(unique(ticks$siteID))),
+  site = numeric(length(unique(ticks$Year)) *
+                   length(unique(ticks$siteID)))
+)
+last_week = data.frame(
+  last = numeric(length = length(unique(ticks$Year)) *
+                      length(unique(ticks$siteID))),
+  year = numeric(length(unique(ticks$Year)) *
+                 length(unique(ticks$siteID))),
+  site = numeric(length(unique(ticks$Year)) *
+                 length(unique(ticks$siteID)))
+)
+
+ticks$site_num = as.integer(as.factor(ticks$siteID))
 
 j = 1
 for(i in sort(unique(ticks$Year))) {
-  first_week[j] = min(
-    ticks[which(ticks$Year == i), "mmwrWeek"]
-  )
-  last_week[j] = max(
-    ticks[which(ticks$Year == i), "mmwrWeek"]
-  )
-  j = j + 1
+  for(k in sort(unique(ticks$site_num))) {
+    first_week[j, "first"] = ifelse(nrow(
+      ticks[which(ticks$Year == i & ticks$site_num == k), "mmwrWeek"]) > 0,
+      min(
+      ticks[which(ticks$Year == i & ticks$site_num == k), "mmwrWeek"]
+    ), NA)
+    
+    first_week[j, "year"] = as.numeric(i)
+    first_week[j, "site"] = k
+    
+    last_week[j, "last"] = ifelse(nrow(
+      ticks[which(ticks$Year == i & ticks$site_num == k), "mmwrWeek"]) > 0,
+      max(
+      ticks[which(ticks$Year == i & ticks$site_num == k), "mmwrWeek"]
+    ), NA)
+    
+    last_week[j, "year"] = as.numeric(i)
+    last_week[j, "site"] = k
+    j = j + 1 
+  }
 }
 
-year_iter = 1
-for(year in sort(unique(ticks$Year))) {
-  first = first_week[year_iter]
-  last = last_week[year_iter]
-  for(week in first:last) {
-    for(site in sort(unique(ticks$siteID))) {
-      
-      # check if value exists
-      value = ifelse(nrow(ticks[which(
+for(year in sort(unique(first_week$year))) {
+  for(site in sort(unique(first_week$site))) {
+    
+    first = first_week[which(
+      first_week$year == year & first_week$site == site), "first"]
+    last = last_week[which(
+      first_week$year == year & first_week$site == site), "last"]
+    
+    if(is.na(first)) {
+      print("no")
+    } else {
+      for(week in first:last) {
+        
+        # check if value exists
+        value = ifelse(nrow(ticks[which(
           ticks$mmwrWeek == week & 
             ticks$Year == year &
-              ticks$siteID == site), ]) > 0, 
+            ticks$site_num == site), ]) > 0, 
+          
           ticks[which(
             ticks$mmwrWeek == week & 
               ticks$Year == year &
-              ticks$siteID == site), "amblyomma_americanum"][[1]],
+              ticks$site_num == site), "amblyomma_americanum"][[1]],
+          
           NA)
-      new_df[i, "week"] = as.numeric(week)
-      new_df[i, "site"] = site
-      new_df[i, "year"] = as.numeric(year)
-      new_df[i, "density"] = as.numeric(value)
-      i = i + 1
+        
+        temp = data.frame(
+          week = as.numeric(week),
+          year = as.numeric(year),
+          density = as.numeric(value),
+          site = as.character(site)
+        )
+        
+        new_df = rbind(new_df, temp)
+      }
+    }
+    first_last_iter = first_last_iter + 1
+  }
+}
+
+readr::write_csv(new_df, here::here(
+  "./data/new-df-long.csv"
+))
+
+ticks$year_fac = as.integer(as.factor(ticks$Year))
+ticks$week_fac = as.integer(as.factor(ticks$mmwrWeek))
+
+n_weeks = length(unique(ticks$mmwrWeek))
+n_years = length(unique(ticks$Year))
+n_sites = length(unique(ticks$site_num))
+
+tick_array = array(as.numeric(NA), dim = c(n_weeks,
+                           n_years,
+                           n_sites))
+
+for(i in 1:n_weeks) {
+  for(j in 1:n_years) {
+    for(k in 1:n_sites) {
+      
+      temp = ticks[which(
+        ticks$week_fac == i &
+          ticks$year_fac == j & 
+          ticks$site_num == k
+      ),]
+      
+      # find the value (either the real value or NA)
+      if(nrow(temp) > 0) {
+        tick_array[i,j,k] = temp$amblyomma_americanum
+      }
     }
   }
 }
 
-# test 
-week = unique(ticks$mmwrWeek)[1]
-site = unique(ticks$siteID)[1]
-year = unique(ticks$Year)[1]
+starts = matrix(NA, nrow = n_years, ncol = n_sites)
+ends = matrix(NA, nrow = n_years, ncol = n_sites)
 
+for(i in 1:n_years) {
+  for(j in 1:n_sites) {
+    temp = ticks[which(ticks$year_fac == i & ticks$site_num == j),]
+    if(nrow(temp) > 0) {
+      starts[i, j] = min(temp$week_fac)
+      ends[i, j] = max(temp$week_fac)
+    } else {
+      starts[i, j] = NA
+      ends[i, j] = NA
+    }
+  
+  }
+}
 
-data <- list(y = new_df$density, 
-             years_vec,
-             site_id_vec,
-             week_vec,
-             n_obs,
+data <- list(y = tick_array, 
+             starts = starts,
+             ends = ends,
+             years_vec = sort(unique(new_df$year)),
+             site_vec = sort(unique(new_df$site)),
+             n_obs = nrow(new_df),
+             n_years = length(unique(new_df$year)),
+             n_sites = length(unique(new_df$site)),
              x_ic_alpha = 1.5, 
-             x_beta=80, ## initial condition prior
+             x_beta=80,                 ## initial condition prior
              a_obs=1,r_obs=1,           ## obs error prior
              a_add=1,r_add=1            ## process error prior
 )
@@ -132,14 +223,30 @@ model{
   
   #### Process Model
   # loop for each year
-  for(i in unique(years_vec)) {
-        
+  
+  for(y in 1:n_years) {
+    for(s in 1:n_sites) {
+      
+      for(w in starts) {
+      
+      }
+    }
+  }
+  
+  
+  
+  for(j in 1:n_sites) {
+    alpha_s[j] = dnorm(0, tau_add)
+  }
+  
+  for(i in 1:n_years) {
         x[1,i] ~ dgamma(x_ic_alpha, x_beta) # give the first value as the prior
-        alpha.y[i] ~ dnorm(0, tau_add)
+        alpha_y[i] ~ dnorm(0, tau_add)
         
-    for(t in sort(unique(week_vec))[2:length(unique(week_vec))]) {
-      t in sort(unique(week_vec))[2:length(unique(week_vec)
-      log(x[t, i]) <- x[t-1, i] + alpha.y[i]
+    for(t in 1:n_) {
+    
+          log(x[t, i]) <- x[t-1, i] + alpha_y[i] + alpha_s[site[]]
+      
     }
   }
   
