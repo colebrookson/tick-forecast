@@ -48,17 +48,17 @@ ticks$density = ticks$amblyomma_americanum
 ticks = ticks[, c("year_fac", "week_fac", "site_fac", "density", "dayLength", 
                   "maxTemperature", "precipitation")]
 ticks = ticks %>% 
-  dplyr::arrange(site_fac, year_fac, week_fac)
+  dplyr::arrange(year_fac, site_fac, week_fac)
 
 y = ticks$density
 y[which(y == 0)] = NA
 
 data = list(
-  y = y,
+  y = log(y),
   precip = ticks$precipitation,
   max_temp = ticks$maxTemperature,
-  b0 = as.vector(c(0,0)),      ## regression beta means
-  Vb = solve(diag(10000,2)),  
+  b0 = as.vector(c(0,0,0)),      ## regression beta means
+  Vb = solve(diag(10000,3)),  
   #day_length = ticks$dayLength,
   year = ticks$year_fac,
   #week = ticks$week_fac,
@@ -66,9 +66,9 @@ data = list(
   n = nrow(ticks),
   n_sites = 9,
   n_years = length(unique(ticks$year_fac)),
-  x_ic = 1.5, 
-  x_beta = 80,
-  a_obs=1,r_obs=1         ## obs error prior
+  x_ic = 1, 
+  x_beta = 2,
+  a_obs=0.01,r_obs=0.01         ## obs error prior
   
 )
 
@@ -79,7 +79,7 @@ model{
   #### Priors
   x[1] ~ dgamma(x_ic,x_beta)
   tau_obs ~ dgamma(a_obs,r_obs)
-  tau_random ~ dnorm(0.001, 0.001)
+  tau_random ~ dgamma(a_obs, r_obs)
   beta ~ dmnorm(b0, Vb)
   
   #### Process Model
@@ -90,15 +90,16 @@ model{
     alpha_s[s] ~ dnorm(0, tau_random)
   }
   for(t in 2:n){
-    x[t] <- beta[1]*max_temp[t] + beta[2]*precip[t] + x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
+    x[t] <- beta[1] + beta[2]*max_temp[t] + beta[3]*precip[t] + x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
   }
   
   #### Data Model
   for(t in 1:n){
-    y[t] ~ dnorm(x[t],tau_obs)
+    y[t] ~ dnorm(x[t],tau_obs) 
   }
 }
 "
+
 
 nchain = 3
 init <- list()
@@ -118,10 +119,8 @@ jags.out   <- coda.samples (model = j.model,
 plot(jags.out)
 
 jags_out_larger = coda.samples(model = j.model,
-                               variable.names = c("x", "tau_obs", "tau_random"),
-                               n.iter = 10000)
-
-
+                               variable.names = c("x", "tau_obs", "tau_random", "beta[1]", "beta[2]"),
+                               n.iter = 1000)
 
 # plotting results
 time.rng = c(1,length(time))       ## adjust to zoom in and out
@@ -136,3 +135,15 @@ if(diff(time.rng) < 100){
 }
 ecoforecastR::ciEnvelope(time,ci[1,],ci[3,],col=ecoforecastR::col.alpha("lightBlue",0.75))
 points(time,y,pch="+",cex=0.5)
+
+# result_data = data.frame(
+#   time = time,
+#   obs = y,
+#   upper = ci[3,],
+#   lower = ci[1,],
+#   mean = ci[2,]
+# )
+# 
+# ggplot(data = result_data) + 
+#   geom_point(aes(x = time, y = obs)) + 
+#   geom_ribbon(aes(x = time, ymin = upper, ymax = lower))
