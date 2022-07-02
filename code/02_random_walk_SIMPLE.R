@@ -94,7 +94,7 @@ model{
     alpha_s[s] ~ dnorm(0, tau_random)
   }
   for(t in 2:n){
-    mu[t] <- beta[1] + beta[2]*max_temp[site[t]] + beta[3]*precip[site[t]] + x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
+    mu[t] <- x[t-1] + beta[1]*max_temp[site[t]] + beta[2]*precip[site[t]] + beta[3]*x[t-1] + alpha_y[year[t]] + alpha_s[site[t]]
     x[t] ~ dnorm(mu[t], tau_process)
   }
   
@@ -105,7 +105,7 @@ model{
 }
 "
 
-
+# + beta[3]*precip[site[t]]
 
 nchain = 3
 init <- list()
@@ -126,10 +126,11 @@ plot(jags.out)
 
 jags_out_larger = coda.samples(model = j.model,
                                variable.names = c("x", "tau_obs", "tau_random", "tau_process", "beta[1]", "beta[2]"),
-                               n.iter = 1000)
+                               n.iter = 10000)
 jags_out = coda.samples(model = j.model,
-                        variable.names = c("x", "tau_obs", "tau_random", "tau_process", "beta[1]", "beta[2]"),
+                        variable.names = c("tau_obs", "tau_random", "tau_process", "beta", "alpha_y", "alpha_s"),
                         n.iter = 1000)
+plot(jags_out)
 #jags_out_params = coda.smaples
 #plot(jags_out_larger)
 
@@ -148,7 +149,7 @@ out <- as.matrix(jags_out_larger)         ## convert from coda to matrix
 out_large = matrix(nrow = nrow(out), ncol = ncol(out)-5)
 for(i in 1:nrow(out)) {
   for(j in 1:ncol(out_large)) {
-    out_large[i,j] = rnorm(1, out[i,j+5], out[i,"tau_process"]) 
+    out_large[i,j] = rnorm(1, out[i,j+5], 1/sqrt(out[i,"tau_process"])) 
   }
 }
 # get difference between confidence interval and predictive interval 
@@ -189,15 +190,16 @@ ggplot(data = df) +
               alpha = 0.3, fill = "red1") + 
   ylim(0, 1000)
 
-
+dev.off()
 plot(time,ci[2,],type='n',ylim=range(y,na.rm=TRUE),ylab="tick density",xlim=time[time.rng])
 ## adjust x-axis label to be monthly if zoomed
 if(diff(time.rng) < 100){ 
   axis.Date(1, at=seq(time[time.rng[1]],time[time.rng[2]],by='month'), log='y', format = "%Y-%m")
 }
-ecoforecastR::ciEnvelope(time,ci_process[1,],ci_process[3,],
-                         col=ecoforecastR::col.alpha("lightGreen",0.75))
+#ecoforecastR::ciEnvelope(time,ci_process[1,],ci_process[3,],
+#                         col=ecoforecastR::col.alpha("lightGreen",0.75))
 ecoforecastR::ciEnvelope(time,ci[1,],ci[3,],col=ecoforecastR::col.alpha("lightBlue",0.75))
+lines(time, ci[2,])
 
 points(time,y,pch="+",cex=0.5)
 points(time,ticks_2019, pch="*", cex = 0.5, col = "red")
